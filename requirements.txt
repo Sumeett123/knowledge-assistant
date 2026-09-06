@@ -3,6 +3,9 @@ uvicorn
 pydantic
 python-multipart
 pypdf
-nltk
 sentence-transformers
 faiss-cpu
+streamlit
+requests
+torch
+transformers

@@ -1,16 +1,18 @@
+from pathlib import Path
+
 from pypdf import PdfReader
 
-def extract_text_from_pdf(file_path: str) -> str:
-    reader = PdfReader(file_path)
-    text=[]
 
-    for page in reader.pages:
-        page_text = page.extract_text()
-        if page_text:
-            text.append(page_text)
+def extract_pages_from_pdf(file_path: str | Path) -> list[tuple[int, str]]:
+    """Extract text with its one-based PDF page number for verifiable citations."""
+    reader = PdfReader(str(file_path))
+    pages: list[tuple[int, str]] = []
+    for number, page in enumerate(reader.pages, start=1):
+        text = (page.extract_text() or "").strip()
+        if text:
+            pages.append((number, text))
+    return pages
 
-    return "\n".join(text)
 
-if __name__ == "__main__":
-    text = extract_text_from_pdf("data/uploads/ML Unit 2 - part 1.pdf")
-    print(text[:500])
+def extract_text_from_pdf(file_path: str | Path) -> str:
+    return "\n".join(text for _, text in extract_pages_from_pdf(file_path)).strip()

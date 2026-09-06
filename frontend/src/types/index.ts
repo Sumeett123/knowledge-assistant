@@ -8,6 +8,8 @@ export interface Message {
   sources?: Array<{
     text: string;
     distance: number;
+    filename?: string;
+    page?: number | null;
   }>;
 }
 
@@ -17,6 +19,8 @@ export interface APIResponse {
   sources: Array<{
     text: string;
     distance: number;
+    filename?: string;
+    page?: number | null;
   }>;
 }
 

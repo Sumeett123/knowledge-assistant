@@ -12,6 +12,8 @@ interface Message {
   sources?: Array<{
     text: string;
     distance: number;
+    filename?: string;
+    page?: number | null;
   }>;
 }
 
@@ -26,11 +28,11 @@ const App: React.FC = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleFileUpload = async (file: File) => {
+  const handleFileUpload = async (files: File[]) => {
     setIsLoading(true);
     setUploadProgress(0);
     const formData = new FormData();
-    formData.append('file', file);
+    files.forEach((file) => formData.append('files', file));
 
     try {
       // Simulate upload progress
@@ -48,13 +50,13 @@ const App: React.FC = () => {
 
       if (response.ok) {
         const data = await response.json();
-        setSelectedFile(file.name);
+        setSelectedFile(files.map((file) => file.name).join(', '));
 
         // Add system message
         const welcomeMessage: Message = {
           id: Date.now().toString(),
           type: 'assistant',
-          content: `✅ Successfully uploaded "${data.filename}". I've processed ${data.num_chunks} chunks from your document. You can now ask questions about it!`,
+          content: `✅ Successfully uploaded ${data.files?.length || files.length} PDF(s): ${data.files?.map((item: { filename: string }) => item.filename).join(', ') || files.map((file) => file.name).join(', ')}. I've processed ${data.total_chunks || data.num_chunks} chunks. You can ask about a specific file (for example, "from the second PDF") or several questions from one file.`,
           timestamp: new Date(),
         };
         setMessages([welcomeMessage]);

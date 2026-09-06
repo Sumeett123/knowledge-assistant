@@ -1,0 +1,15 @@
+# Python runtime files
+__pycache__/
+*.py[cod]
+
+# Local virtual environments
+.venv/
+venv/
+
+# User-uploaded documents and generated vector indexes
+data/uploads/
+data/index/
+
+# Frontend dependencies and builds
+frontend/node_modules/
+frontend/dist/

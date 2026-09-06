@@ -3,7 +3,7 @@ import { Upload } from 'lucide-react';
 import './FileUpload.css';
 
 interface FileUploadProps {
-  onFileSelect: (file: File) => void;
+  onFileSelect: (files: File[]) => void;
   isLoading: boolean;
   uploadProgress: number;
 }
@@ -27,9 +27,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, isLoading, upload
 
     const files = e.dataTransfer.files;
     if (files.length > 0) {
-      const file = files[0];
-      if (file.type === 'application/pdf') {
-        onFileSelect(file);
+      const selected = Array.from(files);
+      if (selected.every((file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))) {
+        onFileSelect(selected);
       } else {
         alert('Please upload a PDF file');
       }
@@ -39,7 +39,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, isLoading, upload
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.currentTarget.files;
     if (files && files.length > 0) {
-      onFileSelect(files[0]);
+      onFileSelect(Array.from(files));
     }
   };
 
@@ -65,6 +65,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, isLoading, upload
           <input
             ref={fileInputRef}
             type="file"
+            multiple
             accept=".pdf"
             onChange={handleFileInputChange}
             disabled={isLoading}
@@ -76,7 +77,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, isLoading, upload
               <div className="upload-icon">
                 <Upload size={48} />
               </div>
-              <h2 className="upload-text">Drag and drop your PDF here</h2>
+              <h2 className="upload-text">Drag and drop one or more PDFs here</h2>
               <p className="upload-hint">or click to select from your computer</p>
               <p className="upload-support">Supports: PDF files only</p>
             </>

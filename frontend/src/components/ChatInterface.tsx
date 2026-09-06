@@ -10,6 +10,8 @@ interface Message {
   sources?: Array<{
     text: string;
     distance: number;
+    filename?: string;
+    page?: number | null;
   }>;
 }
 
@@ -60,7 +62,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               </div>
               <div className="message-content-wrapper">
                 <div className="message-bubble">
-                  <p className="message-text">{message.content}</p>
+                  <p className="message-text" style={{ whiteSpace: 'pre-wrap' }}>{message.content}</p>
                   <span className="message-time">
                     {message.timestamp.toLocaleTimeString([], {
                       hour: '2-digit',
@@ -76,7 +78,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                       {message.sources.map((source, index) => (
                         <div key={index} className="source-card">
                           <div className="source-header">
-                            <span className="source-number">Source {index + 1}</span>
+                            <span className="source-number">
+                              {source.filename ? `${source.filename}${source.page ? ` · p. ${source.page}` : ''}` : `Source ${index + 1}`}
+                            </span>
                             <span className="source-distance">
                               Confidence: {(100 - source.distance * 100).toFixed(1)}%
                             </span>

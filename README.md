@@ -10,12 +10,12 @@ This is a **systems-focused AI project**, emphasizing correctness, robustness, a
 
 ## Key Features
 
-* 📄 **Document ingestion (PDF)** with text extraction
+* 📄 **Single or multi-PDF ingestion** with text extraction
 * ✂️ **Sentence-aware chunking** with overlap for context preservation
-* 🔍 **Semantic search** using SentenceTransformers + FAISS
-* 📐 **Distance-based confidence thresholding** to avoid hallucinations
+* 🔍 **Metadata-aware semantic search** using SentenceTransformers + FAISS cosine similarity
+* 📄 **Cross-document retrieval** that considers the best matching evidence from every uploaded PDF
 * 🧠 **Local LLM generation** using FLAN-T5 (GPU/CPU fallback)
-* 📚 **Source-grounded answers** with similarity scores
+* 📚 **Source-grounded answers** with document-name, page, and similarity citations
 * 💾 **Persistent vector store** (survives server restarts)
 * ⚡ **FastAPI backend** with structured request validation
 
@@ -28,7 +28,7 @@ User Query
    ↓
 FastAPI (/query)
    ↓
-VectorStore.search()
+VectorStore.search() — broad retrieval + per-document evidence coverage
    ↓
 Top-k chunks + distances
    ↓ (threshold check)
@@ -59,9 +59,12 @@ Final Answer + Sources
 * Industry-standard for similarity search
 
 ### Evaluation & Hallucination Control
-The system uses FAISS L2 distances to estimate retrieval confidence. 
-If the closest retrieved chunk exceeds a threshold (0.8), the system abstains 
-and responds with \"I don't know\" to prevent hallucinations.
+The system uses normalized cosine similarity for ranking, but does not pretend a
+single global distance cutoff is a reliable confidence score. It retrieves a broad
+candidate set, preserves the strongest evidence from each uploaded PDF, and tells
+the generator to abstain when supplied evidence does not answer the question.
+Every returned chunk retains its document name and one-based PDF page number so a
+reader can audit the answer.
 
 
 ### Why sentence-based chunking?
@@ -69,10 +72,11 @@ and responds with \"I don't know\" to prevent hallucinations.
 * Preserves semantic meaning better than fixed-length splits
 * Reduces context fragmentation
 
-### Why distance thresholding?
+### Why cross-document retrieval?
 
-* Prevents the system from answering when retrieval confidence is low
-* Explicit hallucination control ("I don’t know" when unsure)
+* A long or repetitive document cannot monopolize the result list
+* The answer can use evidence from another uploaded PDF when the first PDF is irrelevant
+* Page-level provenance makes results suitable for evaluation and research reporting
 
 ### Why local LLM?
 
@@ -151,7 +155,12 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
+# In another terminal:
+streamlit run streamlit_app.py
 ```
+
+Select one or more PDFs in Streamlit, then click **Process selected PDFs**.
+The first model startup may take longer because FLAN-T5 is loaded locally.
 
 ---
 
