@@ -61,10 +61,11 @@ const App: React.FC = () => {
         };
         setMessages([welcomeMessage]);
       } else {
+        const detail = await response.json().catch(() => null);
         const errorMessage: Message = {
           id: Date.now().toString(),
           type: 'assistant',
-          content: '❌ Failed to upload file. Please try again.',
+          content: `❌ ${detail?.detail || 'Failed to upload file. Please try again.'}`,
           timestamp: new Date(),
         };
         setMessages([errorMessage]);
@@ -84,7 +85,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleQuery = async (question: string) => {
+  const handleQuery = async (question: string, previousAnswer?: string) => {
     if (!question.trim()) return;
 
     // Add user message
@@ -104,7 +105,7 @@ const App: React.FC = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, previous_answer: previousAnswer }),
       });
 
       if (response.ok) {
@@ -120,10 +121,11 @@ const App: React.FC = () => {
 
         setMessages((prev) => [...prev, assistantMessage]);
       } else {
+        const detail = await response.json().catch(() => null);
         const errorMessage: Message = {
           id: (Date.now() + 1).toString(),
           type: 'assistant',
-          content: '❌ Failed to get response. Please try again.',
+          content: `❌ ${detail?.detail || 'Failed to get a response. Please try again.'}`,
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, errorMessage]);

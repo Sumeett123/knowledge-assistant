@@ -110,6 +110,31 @@
   opacity: 0.8;
 }
 
+.answer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.answer-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  background: #fff;
+  border: 1px solid #d8d8e8;
+  border-radius: 6px;
+  color: #5b55a8;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.answer-action:hover {
+  background: #f3f1ff;
+  border-color: #867ee0;
+}
+
 .message-bubble.loading {
   padding: 12px 16px;
 }

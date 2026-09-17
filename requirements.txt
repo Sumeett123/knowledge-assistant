@@ -5,7 +5,6 @@ python-multipart
 pypdf
 sentence-transformers
 faiss-cpu
-streamlit
 requests
 torch
 transformers

@@ -10,7 +10,28 @@ interface FileUploadProps {
 
 const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, isLoading, uploadProgress }) => {
   const [isDragOver, setIsDragOver] = useState(false);
+  const [validationError, setValidationError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const submitFiles = (selected: File[]) => {
+    const invalid = selected.find((file) => file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf'));
+    const oversized = selected.find((file) => file.size > 50 * 1024 * 1024);
+    const duplicateName = selected.find((file, index) => selected.findIndex((other) => other.name === file.name && other.size === file.size) !== index);
+    if (invalid) {
+      setValidationError(`“${invalid.name}” is not a PDF file.`);
+      return;
+    }
+    if (oversized) {
+      setValidationError(`“${oversized.name}” is larger than the 50 MB limit.`);
+      return;
+    }
+    if (duplicateName) {
+      setValidationError(`“${duplicateName.name}” was selected more than once.`);
+      return;
+    }
+    setValidationError('');
+    onFileSelect(selected);
+  };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -26,20 +47,13 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, isLoading, upload
     setIsDragOver(false);
 
     const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      const selected = Array.from(files);
-      if (selected.every((file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))) {
-        onFileSelect(selected);
-      } else {
-        alert('Please upload a PDF file');
-      }
-    }
+    if (files.length > 0) submitFiles(Array.from(files));
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.currentTarget.files;
     if (files && files.length > 0) {
-      onFileSelect(Array.from(files));
+      submitFiles(Array.from(files));
     }
   };
 
@@ -80,6 +94,8 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, isLoading, upload
               <h2 className="upload-text">Drag and drop one or more PDFs here</h2>
               <p className="upload-hint">or click to select from your computer</p>
               <p className="upload-support">Supports: PDF files only</p>
+              <p className="upload-support">Maximum size: 50 MB per PDF</p>
+              {validationError && <p className="upload-error" role="alert">{validationError}</p>}
             </>
           ) : (
             <>

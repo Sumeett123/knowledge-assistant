@@ -1,6 +1,8 @@
 """Text preparation helpers used during document ingestion."""
 
 import re
+import unicodedata
+from difflib import SequenceMatcher
 from dataclasses import dataclass
 
 
@@ -13,6 +15,7 @@ _STOP_WORDS = {
 # without relying on a network service or blindly rewriting every query.
 _CONCEPT_FAMILIES = (
     {"importance", "significance", "benefit", "benefits", "advantage", "advantages", "value", "role"},
+    {"pro", "pros", "benefit", "benefits", "advantage", "advantages"},
     {"disadvantage", "disadvantages", "drawback", "drawbacks", "limitation", "limitations", "demerit", "demerits"},
     {"type", "types", "kind", "kinds", "category", "categories", "classification"},
 )
@@ -31,12 +34,72 @@ def _semantic_overlap(question_terms: set[str], title_terms: set[str]) -> float:
         if term in title_terms:
             matched += 1
             continue
+        # A small spelling mistake should not stop a question-bank heading such as
+        # "information system" from matching "information syatem".  This remains
+        # conservative by allowing only one close word match per query term.
+        if any(SequenceMatcher(None, term, candidate).ratio() >= 0.80 for candidate in title_terms):
+            matched += 1
+            continue
         if any(term in family and title_terms.intersection(family) for family in _CONCEPT_FAMILIES):
             matched += 1
     return matched / len(question_terms)
 
 
 _QUESTION_START = r"(?:explain|describe|define|discuss|compare|differentiate|list|what|how|why|when|give|write|state|mention)"
+
+
+def is_ambiguous_standalone_question(value: str) -> bool:
+    """Identify requests that need conversational context, not document retrieval."""
+    normalized = re.sub(r"\s+", " ", value.lower()).strip(" .?!")
+    vague_requests = {
+        "explain it", "explain this", "tell me more", "what about it", "what is it",
+        "what are its types", "give advantages", "give disadvantages", "make it simple",
+        "make it simpler", "shorten it", "summarize it", "give an example",
+    }
+    pronoun_only = re.fullmatch(r"(?:explain|define|describe|summarize|shorten|simplify)\s+(?:it|this|that|the above)", normalized)
+    return normalized in vague_requests or bool(pronoun_only)
+
+
+def is_nonsense_input(value: str) -> bool:
+    """Reject input that has no meaningful question content.
+
+    Catches emoji-only, symbol-only, repeated single characters, and strings
+    that contain no letters or digits after stripping.
+    """
+    stripped = value.strip()
+    if not stripped:
+        return True
+    # Remove all Unicode emoji / symbol / punctuation categories; if nothing
+    # is left the input has no linguistic content.
+    alpha_chars = [ch for ch in stripped if unicodedata.category(ch)[0] in ("L", "N")]
+    if not alpha_chars:
+        return True
+    # Excessive repetition of a single character (e.g. "aaaaaaa", "??????")
+    if len(set(stripped.lower().replace(" ", ""))) <= 2 and len(stripped) >= 4:
+        return True
+    return False
+
+
+def answer_request_kind(value: str) -> str | None:
+    """Map common student follow-up wording to a safe answer transformation."""
+    normalized = re.sub(r"\s+", " ", value.lower()).strip(" .?!")
+    # "school student" / "for a kid" must be checked before "simple" to avoid
+    # the broader pattern swallowing it.
+    if re.search(r"\b(school\s*student|child|kid|young learner|class \d)\b", normalized):
+        return "student"
+    if re.search(r"\b(table|tabular|compare in a table|comparison table)\b", normalized):
+        return "table"
+    if re.search(r"\b(simple|simpler|simply|easy|beginner|easy words?)\b", normalized):
+        return "simple"
+    if re.search(r"\b(short|shorter|brief|summar(?:y|ise|ize)|2 lines?|few lines?)\b", normalized):
+        return "short"
+    if re.search(r"\b(bullet|points?|key points?)\b", normalized):
+        return "bullets"
+    if re.search(r"\b(example|real[ -]?life|practical)\b", normalized):
+        return "example"
+    if re.search(r"\b(?:2|two|5|five|10|ten)[ -]?(?:mark|marks)\b|\bexam answer\b", normalized):
+        return "exam"
+    return None
 
 
 @dataclass(frozen=True)
@@ -46,6 +109,7 @@ class DocumentScope:
     include: tuple[str, ...] = ()
     exclude: tuple[str, ...] = ()
     prefer_end: bool = False
+    topic_search: bool = False
 
 
 def document_scope(question: str, filenames: list[str]) -> DocumentScope:
@@ -88,11 +152,26 @@ def document_scope(question: str, filenames: list[str]) -> DocumentScope:
         stem = re.sub(r"\.pdf$", "", filename.lower())
         if re.search(rf"\b(?:skip|ignore|exclude)\s+(?:the\s+)?{re.escape(stem)}(?:\.pdf)?\b", normalized):
             exclude.append(filename)
+    # Unit / chapter / module name matching — e.g. "Answer from ML Unit 2"
+    unit_match = re.search(r"\b(?:unit|chapter|module|section)\s*(\d+)", normalized)
+    if unit_match:
+        unit_fragment = unit_match.group(0)  # e.g. "unit 2"
+        for filename in ordered:
+            stem = re.sub(r"\.pdf$", "", filename.lower())
+            # Filenames may use underscores where the question uses spaces.
+            stem_normalized = stem.replace("_", " ")
+            if unit_fragment in stem_normalized:
+                include.append(filename)
     include = [name for name in dict.fromkeys(include) if name not in exclude]
+    topic_search = bool(re.search(
+        r"\bwhich\s+(?:pdf|document|file)s?\s+(?:contains?|has|have|mentions?|talks?\s+about|covers?|discusses?)",
+        normalized,
+    ))
     return DocumentScope(
         include=tuple(include),
         exclude=tuple(dict.fromkeys(exclude)),
         prefer_end=bool(re.search(r"\b(?:at|from|near|toward|towards)\s+(?:the\s+)?(?:very\s+)?(?:end|last part)|\bend\s+of\s+(?:the\s+)?(?:first|second|third|fourth|last|\d+)?\s*(?:pdf|document|file)\b|\blast (?:page|section|part)\b", normalized)),
+        topic_search=topic_search,
     )
 
 
@@ -106,6 +185,28 @@ def split_compound_questions(value: str, max_questions: int = 4) -> list[str]:
     normalized = re.sub(r"\s+", " ", value).strip()
     if not normalized:
         return []
+    # Students often omit the verb in a follow-up clause, for example
+    # "use of information system to society and also its pros".  Treat this as
+    # two complete requests instead of sending an ambiguous single query to the
+    # retriever.  Keeping the second request self-contained is important because
+    # each subquestion is answered independently.
+    shorthand_pair = re.match(
+        r"^(?:explain\s+)?(?:the\s+)?(?:use|uses|importance|role)\s+(?:of\s+)?"
+        r"(?P<topic>.+?)\s+and\s+also\s+(?:its\s+)?(?:pros?|benefits?|advantages?)\s*(?:of\s+it)?$",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if shorthand_pair:
+        topic = shorthand_pair.group("topic").strip(" .;:-")
+        questions = [
+            f"Explain the importance of {topic}",
+            # The question-bank heading commonly says only "its advantages and
+            # disadvantages".  Keep this form so the extractive Q&A matcher can
+            # select that answer; the original subject still guides the first
+            # subquestion and the same document is searched for both.
+            "Explain advantages and disadvantages",
+        ]
+        return list(dict.fromkeys(questions))
     boundaries = [
         rf"\s*(?:\n|;|(?<!\d)\.)\s*(?={_QUESTION_START}\b)",
         rf"\s+(?:and\s+also|also|and\s+then|then|and)\s+(?={_QUESTION_START}\b)",
@@ -141,7 +242,7 @@ def split_compound_questions(value: str, max_questions: int = 4) -> list[str]:
         else:
             paired = re.match(
                 r"^(?P<verb>explain|describe|define|discuss|list)\s+(?P<first>.+?)\s+and\s+"
-                r"(?P<second>(?:the\s+)?advantages?\s+and\s+(?:its\s+|the\s+)?disadvantages?.*)$",
+                r"(?P<second>(?:the\s+)?(?:its\s+)?advantages?\s+and\s+(?:its\s+|the\s+)?disadvantages?.*)$",
                 question,
                 flags=re.IGNORECASE,
             )
@@ -149,6 +250,22 @@ def split_compound_questions(value: str, max_questions: int = 4) -> list[str]:
                 expanded.extend([
                     f"{paired.group('verb')} {paired.group('first')}",
                     f"{paired.group('verb')} {paired.group('second')}",
+                ])
+                continue
+            # "what is X and its advantages and disadvantages" — the most
+            # common student phrasing that uses "what is" instead of an
+            # imperative verb.
+            what_paired = re.match(
+                r"^(?P<opener>what\s+(?:is|are))\s+(?P<first>.+?)\s+and\s+"
+                r"(?:its\s+|the\s+)?(?P<second>advantages?\s+and\s+(?:its\s+|the\s+)?disadvantages?.*)$",
+                question,
+                flags=re.IGNORECASE,
+            )
+            if what_paired:
+                topic = what_paired.group("first").strip()
+                expanded.extend([
+                    f"{what_paired.group('opener')} {topic}",
+                    f"Explain {what_paired.group('second')} of {topic}",
                 ])
                 continue
             expanded.append(question)
@@ -173,7 +290,7 @@ def extract_direct_answer(question: str, source_text: str) -> str | None:
         return None
     for match in reversed(list(re.finditer(r"\bans(?:wer)?\s*:\s*", source_text, flags=re.IGNORECASE))):
         preceding_question = source_text[max(0, match.start() - 550):match.start()]
-        overlap = len(question_terms & _keywords(preceding_question)) / len(question_terms)
+        overlap = _semantic_overlap(question_terms, _keywords(preceding_question))
         if overlap < 0.70:
             continue
         answer = source_text[match.end():]

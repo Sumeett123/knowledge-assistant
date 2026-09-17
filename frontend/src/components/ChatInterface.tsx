@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Send, Loader } from 'lucide-react';
+import { Send, Loader, MessageCircle, Sparkles, List, Lightbulb, FileText, GraduationCap, Table2 } from 'lucide-react';
 import './ChatInterface.css';
 
 interface Message {
@@ -18,7 +18,7 @@ interface Message {
 interface ChatInterfaceProps {
   messages: Message[];
   isLoading: boolean;
-  onSendMessage: (message: string) => void;
+  onSendMessage: (message: string, previousAnswer?: string) => void;
   chatEndRef: React.RefObject<HTMLDivElement>;
 }
 
@@ -29,11 +29,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   chatEndRef,
 }) => {
   const [inputValue, setInputValue] = useState('');
+  const [followUpAnswer, setFollowUpAnswer] = useState<string | undefined>();
 
   const handleSendMessage = () => {
     if (inputValue.trim()) {
-      onSendMessage(inputValue);
+      onSendMessage(inputValue, followUpAnswer);
       setInputValue('');
+      setFollowUpAnswer(undefined);
     }
   };
 
@@ -42,6 +44,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       e.preventDefault();
       handleSendMessage();
     }
+  };
+
+  const explainSimply = (answer: string) => {
+    onSendMessage('Explain this answer in simpler words.', answer);
+  };
+
+  const rewriteAnswer = (answer: string, request: string) => {
+    onSendMessage(request, answer);
   };
 
   return (
@@ -70,6 +80,35 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     })}
                   </span>
                 </div>
+
+                {message.type === 'assistant' && !isLoading && (
+                  <div className="answer-actions">
+                    <button className="answer-action" onClick={() => explainSimply(message.content)}>
+                      <Sparkles size={15} /> Explain simply
+                    </button>
+                    <button
+                      className="answer-action"
+                      onClick={() => setFollowUpAnswer(message.content)}
+                    >
+                      <MessageCircle size={15} /> Ask follow-up
+                    </button>
+                    <button className="answer-action" onClick={() => rewriteAnswer(message.content, 'Give this answer as key bullet points.')}>
+                      <List size={15} /> Key points
+                    </button>
+                    <button className="answer-action" onClick={() => rewriteAnswer(message.content, 'Give a simple example for this answer.')}>
+                      <Lightbulb size={15} /> Example
+                    </button>
+                    <button className="answer-action" onClick={() => rewriteAnswer(message.content, 'Make this an exam-style answer.')}>
+                      <FileText size={15} /> Exam answer
+                    </button>
+                    <button className="answer-action" onClick={() => rewriteAnswer(message.content, 'Explain for a school student.')}>
+                      <GraduationCap size={15} /> School student
+                    </button>
+                    <button className="answer-action" onClick={() => rewriteAnswer(message.content, 'Compare in a table.')}>
+                      <Table2 size={15} /> Table
+                    </button>
+                  </div>
+                )}
 
                 {message.sources && message.sources.length > 0 && (
                   <div className="sources-container">
@@ -122,7 +161,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="Ask a question about your document... (Shift + Enter for new line)"
+            placeholder={followUpAnswer ? 'Ask a follow-up about the selected answer...' : 'Ask a question about your document... (Shift + Enter for new line)'}
             disabled={isLoading}
             className="chat-input"
             rows={1}
@@ -135,7 +174,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             {isLoading ? <Loader size={20} className="loading-icon" /> : <Send size={20} />}
           </button>
         </div>
-        <p className="input-hint">Press Enter to send, Shift + Enter for new line</p>
+        <p className="input-hint">Press Enter to send, Shift + Enter for new line. You can ask up to four questions at once.</p>
       </div>
     </div>
   );

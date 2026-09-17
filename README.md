@@ -135,13 +135,12 @@ This ensures:
 * Uses character-based distance instead of token-level scoring
 * No re-ranking step
 * Single-user, local setup
-* No frontend UI (yet)
+* Single React web interface; start the backend and frontend separately during local development
 
 ---
 
 ## Future Work
 
-* Add minimal frontend (Streamlit / HTML)
 * Implement reranking for retrieved chunks
 * Add evaluation metrics for retrieval quality
 * Dockerize for deployment
@@ -150,16 +149,22 @@ This ensures:
 
 ## How to Run
 
-```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-# In another terminal:
-streamlit run streamlit_app.py
+In one terminal, start the FastAPI backend:
+
+```powershell
+cd D:\MajorProject\knowledge-assistant
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-Select one or more PDFs in Streamlit, then click **Process selected PDFs**.
+In a second terminal, start the React frontend:
+
+```powershell
+cd D:\MajorProject\knowledge-assistant\frontend
+npm install
+npm start
+```
+
+Open `http://localhost:3000`, upload one or more PDFs, and ask questions there.
 The first model startup may take longer because FLAN-T5 is loaded locally.
 
 ---
