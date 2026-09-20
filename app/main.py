@@ -12,14 +12,15 @@ from pydantic import BaseModel, Field
 from app.generator import generate_answer, rewrite_answer
 from app.ingest import extract_pages_from_pdf
 from app.utils import (answer_request_kind, chunk_text, document_scope, extract_direct_answer,
-                       extract_question_bank_answer, is_ambiguous_standalone_question,
-                       is_nonsense_input, split_compound_questions)
+                       extract_grounded_list_answer, extract_question_bank_answer,
+                       is_ambiguous_standalone_question, is_nonsense_input,
+                       split_compound_questions)
 from app.vector_store import VectorStore
 
 app = FastAPI(title="Knowledge Assistant")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -28,6 +29,30 @@ vector_store.load()
 UPLOAD_DIR = Path("data/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+
+def _context_windows(results: list[dict], records: list[dict], limit: int = 3) -> list[str]:
+    """Add adjacent chunks so an answer is not built from a sentence fragment."""
+    positions = {
+        (record.get("filename"), record.get("page"), record.get("text")): index
+        for index, record in enumerate(records)
+    }
+    contexts: list[str] = []
+    seen: set[str] = set()
+    for result in results:
+        position = positions.get((result.get("filename"), result.get("page"), result.get("text")))
+        if position is None:
+            continue
+        filename = result.get("filename")
+        window = records[max(0, position - 1):position + 2]
+        window = [record for record in window if record.get("filename") == filename]
+        context = "\n".join(record.get("text", "") for record in window).strip()
+        if context and context not in seen:
+            contexts.append(context)
+            seen.add(context)
+        if len(contexts) >= limit:
+            break
+    return contexts
 
 
 class QueryRequest(BaseModel):
@@ -123,7 +148,14 @@ def query_docs(req: QueryRequest):
             answer = next((item for item in direct_answers if item), None)
         try:
             if answer is None:
-                answer = generate_answer(subquestion, [item["text"] for item in results])
+                # Keep only the strongest evidence in the small model window so
+                # each source gets enough tokens for a complete explanation. All
+                # retrieved results remain in the response as citations.
+                contexts = _context_windows(results, scoped_records)
+                answer = generate_answer(subquestion, contexts)
+                grounded_list = extract_grounded_list_answer(subquestion, contexts)
+                if grounded_list and (not answer or answer == "I don't know" or len(answer.split()) < 45):
+                    answer = grounded_list
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"The answer model is unavailable: {exc}") from exc
         answers.append({"question": subquestion, "answer": answer or "I don't know"})
@@ -207,14 +239,16 @@ def upload_files(
             destination.unlink(missing_ok=True)
         raise
     existing_hashes = {record.get("document_hash") for record in vector_store.records}
-    incoming_hashes = [document_hash for _, _, document_hash, _ in prepared]
-    if len(set(incoming_hashes)) != len(incoming_hashes) or any(document_hash in existing_hashes for document_hash in incoming_hashes):
-        for _, _, _, destination in prepared:
-            destination.unlink(missing_ok=True)
-        raise HTTPException(status_code=409, detail="This PDF has already been indexed. Upload a different document to avoid duplicate answers.")
+    seen_hashes: set[str] = set()
+    new_chunks: list[dict] = []
+    for _, chunks, document_hash, _ in prepared:
+        if document_hash in existing_hashes or document_hash in seen_hashes:
+            continue
+        seen_hashes.add(document_hash)
+        new_chunks.extend(chunks)
     processed = [item for item, _, _, _ in prepared]
     # Add only after every selected PDF has been successfully validated.
-    vector_store.add_texts([chunk for _, chunks, _, _ in prepared for chunk in chunks])
+    vector_store.add_texts(new_chunks)
     vector_store.save()
     return {
         "message": "Files uploaded and indexed successfully",

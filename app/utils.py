@@ -7,14 +7,15 @@ from dataclasses import dataclass
 
 
 _STOP_WORDS = {
-    "a", "an", "and", "are", "be", "by", "describe", "do", "explain", "for", "how", "in",
-    "is", "its", "of", "on", "or", "the", "to", "what", "with", "write",
+    "a", "an", "and", "are", "be", "by", "can", "could", "describe", "do", "does", "explain",
+    "for", "how", "in", "is", "its", "may", "me", "of", "on", "or", "the", "to", "what",
+    "why", "with", "will", "would", "write",
 }
 
 # Small, explicit concept families improve matching of natural student phrasing
 # without relying on a network service or blindly rewriting every query.
 _CONCEPT_FAMILIES = (
-    {"importance", "significance", "benefit", "benefits", "advantage", "advantages", "value", "role"},
+    {"importance", "significance", "benefit", "benefits", "advantage", "advantages", "value", "role", "help", "helps", "purpose", "purposes", "use", "uses", "utility"},
     {"pro", "pros", "benefit", "benefits", "advantage", "advantages"},
     {"disadvantage", "disadvantages", "drawback", "drawbacks", "limitation", "limitations", "demerit", "demerits"},
     {"type", "types", "kind", "kinds", "category", "categories", "classification"},
@@ -369,6 +370,29 @@ def extract_question_bank_answer(question: str, records: list[dict]) -> str | No
         if len(answer) >= 80:
             return answer
     return None
+
+
+def extract_grounded_list_answer(question: str, contexts: list[str]) -> str | None:
+    """Assemble labeled items when a small local model returns an incomplete list."""
+    if not re.search(r"\b(?:different|types?|levels?|steps?|stages?|phases?|categories?)\b", question, re.IGNORECASE):
+        return None
+    sentences: list[str] = []
+    for context in contexts:
+        sentences.extend(part.strip() for part in re.split(r"(?<=[.!?])\s+", context) if part.strip())
+    labels = re.compile(
+        r"\b(?:level|stage|phase|step|type|category)\s*[- ]?\d+\b|\b\d+\s*[- ](?:level|stage|phase|step)\b",
+        re.IGNORECASE,
+    )
+    selected: list[str] = []
+    for index, sentence in enumerate(sentences):
+        if not labels.search(sentence):
+            continue
+        for candidate in sentences[index:index + 2]:
+            if candidate not in selected:
+                selected.append(candidate)
+    if len(selected) < 2:
+        return None
+    return " ".join(selected)
 
 
 def chunk_text(text: str, max_chars: int = 1_200, overlap: int = 180) -> list[str]:

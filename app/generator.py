@@ -1,4 +1,5 @@
 import os
+import re
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
@@ -25,29 +26,44 @@ class LocalGenerator:
             self.tokenizer.encode(question, add_special_tokens=False)[:160], skip_special_tokens=True
         )
         instruction = (
-            "Answer the question using only the supplied sources. Synthesize all relevant "
-            "sources, rather than copying one sentence. Give a complete, well-structured "
-            "answer with a definition, explanation, and key points when the evidence supports them. "
-            "For long-answer or exam-style questions, use short paragraphs or bullets. Do not invent facts. "
-            "If the sources do not contain the answer, say exactly: I don't know."
+            "Use only the supplied sources. Answer the question using related facts even if "
+            "the wording differs. Give a complete answer with the important definitions and "
+            "details supported by the sources. Do not invent facts. If the sources do not "
+            "contain the answer, say exactly: I don't know."
         )
+        if re.search(r"\b(different|types?|levels?|steps?|stages?|phases?|categories?)\b", question, re.IGNORECASE):
+            instruction += (
+                " The question asks about multiple items. Identify every distinct item named "
+                "in the sources and explain each one in a numbered list. Do not answer with "
+                "only a general introductory sentence."
+            )
         # Reserve room for the question and instructions.  This avoids the old behavior
         # where tokenizer truncation removed the question and later PDF evidence.
         source_labels = "".join(f"[Source {index}]\n" for index in range(1, len(contexts) + 1))
         reserved = len(self.tokenizer.encode(instruction + question + source_labels + "Sources: Question: Answer:", add_special_tokens=True)) + 12
         available = max(24, MAX_INPUT_TOKENS - reserved)
-        per_source = max(24, available // max(len(contexts), 1))
+        # Retrieved chunks are already ranked. Give the strongest half more room so
+        # multi-concept questions retain explanations instead of only headings.
+        source_count = max(len(contexts), 1)
+        priority_count = max(1, (source_count + 1) // 2)
+        weighted_slots = source_count + priority_count
+        base_source_tokens = max(24, available // weighted_slots)
         source_blocks = []
         for index, context in enumerate(contexts, start=1):
-            token_ids = self.tokenizer.encode(context, add_special_tokens=False)[:per_source]
+            token_budget = base_source_tokens * (2 if index <= priority_count else 1)
+            token_ids = self.tokenizer.encode(
+                context, add_special_tokens=False, truncation=True, max_length=token_budget,
+            )
             source_blocks.append(f"[Source {index}]\n{self.tokenizer.decode(token_ids, skip_special_tokens=True)}")
         sources = "\n\n".join(source_blocks)
-        prompt = f"{instruction}\n\nSources:\n{sources}\n\nQuestion:\n{question}\n\nAnswer:"
+        # Keep the question before the evidence so tokenizer truncation never
+        # removes the user's intent when adjacent chunks are long.
+        prompt = f"{instruction}\n\nQuestion:\n{question}\n\nSources:\n{sources}\n\nAnswer:"
     
         inputs = self.tokenizer(
         prompt,
         return_tensors="pt",
-        truncation=False,
+        truncation=True,
         max_length=MAX_INPUT_TOKENS,
         ).to(self.device)
 

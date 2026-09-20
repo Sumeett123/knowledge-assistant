@@ -10,6 +10,8 @@ import pytest
 from app.utils import (
     answer_request_kind,
     document_scope,
+    extract_direct_answer,
+    extract_grounded_list_answer,
     is_ambiguous_standalone_question,
     is_nonsense_input,
     split_compound_questions,
@@ -39,6 +41,23 @@ class TestDifferentPhrasings:
     def test_valid_phrasings_not_flagged(self, question: str):
         assert not is_ambiguous_standalone_question(question)
         assert not is_nonsense_input(question)
+
+    def test_paraphrase_matches_question_bank_answer(self):
+        source = "Q1: What are the advantages of online banking? Ans: Online banking allows customers to access services conveniently from anywhere. It also makes account management faster, reduces travel, and gives users access to services outside normal branch hours."
+        assert extract_direct_answer("How does online banking help customers?", source) is not None
+
+    def test_unrelated_question_does_not_match_question_bank_answer(self):
+        source = "Q1: What are the advantages of online banking? Ans: Online banking allows customers to access services conveniently from anywhere. It also makes account management faster, reduces travel, and gives users access to services outside normal branch hours."
+        assert extract_direct_answer("What is machine learning?", source) is None
+
+    def test_grounded_list_answer_keeps_all_labeled_levels(self):
+        contexts = [
+            "0-Level Data Flow Diagram shows the system as one process. 1-Level Data Flow Diagram breaks it into major processes.",
+            "2-Level Data Flow Diagram gives more detailed subprocesses. 3-Level Data Flow Diagram gives the most detailed view.",
+        ]
+        answer = extract_grounded_list_answer("Explain the different levels of DFD", contexts)
+        assert answer is not None
+        assert all(label in answer for label in ("0-Level", "1-Level", "2-Level", "3-Level"))
 
 
 # ---------------------------------------------------------------------------
